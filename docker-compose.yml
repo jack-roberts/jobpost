@@ -1,10 +1,16 @@
-version: '3.4'
-
+version: '3.8'
 services:
-  jobpost:
-    image: jobpost
-    build:
-      context: .
-      dockerfile: ./Dockerfile
+  app:
+    build: .
     ports:
-      - 5454:5454
+      - "5858:5858"
+    environment:
+      - SECRET_KEY=${SECRET_KEY}
+      - CLIENT_ID=${CLIENT_ID}
+      - CLIENT_SECRET=${CLIENT_SECRET}
+      - TENANT_ID=${TENANT_ID}
+      - EMAIL_USERNAME=${EMAIL_USERNAME}
+      - EMAIL_PASSWORD=${EMAIL_PASSWORD}
+      - MARKETING_EMAIL=${MARKETING_EMAIL}
+    volumes:
+      - .:/app

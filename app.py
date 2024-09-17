@@ -1,203 +1,331 @@
-from flask import Flask, request, render_template_string
-from PIL import Image, ImageDraw, ImageFont
-import io
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.base import MIMEBase
-from email import encoders
 import os
+from flask import Flask, render_template, request, redirect, url_for, session
+from flask_session import Session
+from dotenv import load_dotenv
+import msal
+from PIL import Image, ImageDraw, ImageFont
+import smtplib
+from email.message import EmailMessage
+import io
+import imaplib
+from apscheduler.schedulers.background import BackgroundScheduler
+import atexit
+
+# Load environment variables
+load_dotenv()
 
 app = Flask(__name__)
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your_flask_secret_key')
+app.config['SESSION_TYPE'] = 'filesystem'
+Session(app)
 
-# Email settings
-SMTP_SERVER = 'smtp.gmail.com'
-SMTP_PORT = 587
-EMAIL_USERNAME = os.getenv('EMAIL_USERNAME')  # Environment variable for your email
-EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')  # Environment variable for the app password
+# Azure AD configuration
+CLIENT_ID = os.getenv('CLIENT_ID')
+CLIENT_SECRET = os.getenv('CLIENT_SECRET')
+TENANT_ID = os.getenv('TENANT_ID')
+AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
+REDIRECT_PATH = "/getAToken"
+SCOPE = ["User.Read"]
+
+# Email configuration
+EMAIL_USERNAME = os.getenv('EMAIL_USERNAME')
+EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')
+MARKETING_EMAIL = os.getenv('MARKETING_EMAIL')
+
+# IMAP configuration
+IMAP_SERVER = "outlook.office365.com"
+IMAP_PORT = 993
+
+# Scheduler setup
+scheduler = BackgroundScheduler()
+scheduler.start()
+
+# Shut down the scheduler when exiting the app
+atexit.register(lambda: scheduler.shutdown())
+
+def build_msal_app(cache=None, authority=None):
+    return msal.ConfidentialClientApplication(
+        CLIENT_ID, authority=authority or AUTHORITY,
+        client_credential=CLIENT_SECRET, token_cache=cache)
+
+def build_auth_url():
+    return build_msal_app().get_authorization_request_url(
+        SCOPE, redirect_uri=url_for('authorized', _external=True))
 
 @app.route('/')
 def index():
-    return '''
-        <form method="POST" action="/generate" enctype="multipart/form-data">
-            Your Email: <input type="email" name="user_email" required><br><br>
-            
-            Job Type: <input type="radio" name="job_type" value="Permanent" required> Permanent
-                      <input type="radio" name="job_type" value="Temporary" required> Temporary<br><br>
+    if not session.get('user'):
+        return redirect(url_for('login'))
+    return redirect(url_for('form'))
 
-            Job Title: <input type="text" name="job_title" required><br><br>
-            Job Location: <input type="text" name="job_location" required><br><br>
-            Job Salary: <input type="text" name="job_salary" required><br><br>
-            
-            Published Client (Optional): <input type="text" name="published_client"><br><br>
-            
-            <input type="submit" value="Request Job Post Image">
-        </form>
-    '''
+@app.route('/login')
+def login():
+    auth_url = build_auth_url()
+    return redirect(auth_url)
 
-@app.route('/generate', methods=['POST'])
-def generate_image():
-    # Get the form data
-    user_email = request.form['user_email']
-    job_type = request.form['job_type']
-    job_title = request.form['job_title']
-    job_location = request.form['job_location']
-    job_salary = request.form['job_salary']
-    published_client = request.form.get('published_client', '')  # Optional field
+@app.route('/getAToken')
+def authorized():
+    if request.args.get('error'):
+        return f"Login error: {request.args['error']}"
+    if 'code' in request.args:
+        result = build_msal_app().acquire_token_by_authorization_code(
+            request.args['code'],
+            scopes=SCOPE,
+            redirect_uri=url_for('authorized', _external=True))
+        if "error" in result:
+            return f"Token acquisition error: {result['error']}"
+        session['user'] = result.get('id_token_claims')
+        email_address = session['user'].get('preferred_username', '')
+        if not email_address.endswith('@jacksonhogg.com'):
+            session.clear()
+            return "Access denied: Unauthorized email domain."
+    return redirect(url_for('form'))
 
-    # If Published Client is provided, ask the user for the company URL
-    if published_client:
-        return render_template_string('''
-            <p>Please provide the URL for {{ published_client }}:</p>
-            <form method="POST" action="/confirm_url">
-                <label>Company URL:</label>
-                <input type="text" name="company_url" required><br><br>
-                <input type="hidden" name="user_email" value="{{ user_email }}">
-                <input type="hidden" name="job_type" value="{{ job_type }}">
-                <input type="hidden" name="job_title" value="{{ job_title }}">
-                <input type="hidden" name="job_location" value="{{ job_location }}">
-                <input type="hidden" name="job_salary" value="{{ job_salary }}">
-                <input type="hidden" name="published_client" value="{{ published_client }}">
-                <input type="submit" value="Submit">
-            </form>
-        ''', published_client=published_client, user_email=user_email, job_type=job_type, job_title=job_title, job_location=job_location, job_salary=job_salary)
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect('https://login.microsoftonline.com/common/oauth2/v2.0/logout' +
+                    f'?post_logout_redirect_uri={url_for("index", _external=True)}')
 
-    # If no Published Client is provided, proceed with the regular image generation
-    return create_and_send_image(user_email, job_type, job_title, job_location, job_salary)
+@app.route('/form', methods=['GET', 'POST'])
+def form():
+    if not session.get('user'):
+        return redirect(url_for('login'))
 
-@app.route('/confirm_url', methods=['POST'])
-def confirm_url():
-    # Get the submitted data
-    company_url = request.form['company_url']
-    user_email = request.form['user_email']
-    job_type = request.form['job_type']
-    job_title = request.form['job_title']
-    job_location = request.form['job_location']
-    job_salary = request.form['job_salary']
-    published_client = request.form['published_client']
+    if request.method == 'POST':
+        wants_branded_ad = request.form.get('wants_branded_ad') == 'yes'
+        if wants_branded_ad:
+            selected_template = request.form.get('template_selection')
+            if selected_template == 'New Brand':
+                # Send details to marketing team
+                send_email_to_marketing(request.form.to_dict())
+                return "Your request for a new branded ad has been submitted. The marketing team has been informed and will design a new branded ad for you."
+            else:
+                # Use selected template to generate image
+                template_path = os.path.join('static', 'BrandedAds', selected_template + '.jpg')
+                image = generate_image_with_template(request.form.to_dict(), template_path)
+                send_email(request.form.get('email'), request.form.get('job_title'), image, request.form.to_dict())
+                return "Email with your branded ad has been sent successfully!"
+        else:
+            # Regular image generation
+            image = generate_image(request.form.to_dict())
+            send_email(request.form.get('email'), request.form.get('job_title'), image, request.form.to_dict())
+            return "Email sent successfully!"
 
-    # Send the email to the marketing team with all the fields and company URL
-    send_email_to_marketing(user_email, job_type, job_title, job_location, job_salary, published_client, company_url)
-
-    # Display the confirmation message to the user
-    return '''
-        <p>Thanks for submitting your post. As this is a client post, it has been sent to the marketing team. They will send you your post back soon.</p>
-    '''
-
-def send_email_to_marketing(user_email, job_type, job_title, job_location, job_salary, published_client, company_url):
-    # Create email message for marketing team
-    msg = MIMEMultipart('related')
-    msg['From'] = EMAIL_USERNAME
-    msg['To'] = 'jack.roberts@jacksonhogg.com'
-    msg['Subject'] = f'Client Post Request: {published_client}'
-
-    # Create the body with job details and company URL
-    body = MIMEMultipart('alternative')
-    html_content = f"""
-    <html>
-    <body>
-        <p>A new client post request has been submitted with the following details:</p>
-        <ul>
-            <li><strong>Your Email:</strong> {user_email}</li>
-            <li><strong>Job Type:</strong> {job_type}</li>
-            <li><strong>Job Title:</strong> {job_title}</li>
-            <li><strong>Location:</strong> {job_location}</li>
-            <li><strong>Salary:</strong> {job_salary}</li>
-            <li><strong>Published Client:</strong> {published_client}</li>
-            <li><strong>Company URL:</strong> <a href="{company_url}">{company_url}</a></li>
-        </ul>
-        <p>The job post image will need to be reviewed and sent back to the user.</p>
-    </body>
-    </html>
-    """
-    html_part = MIMEText(html_content, 'html')
-    body.attach(html_part)
-
-    # Attach the body to the main message
-    msg.attach(body)
-
-    # Send the email to the marketing team
-    with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-        server.starttls()  # Secure the connection
-        server.login(EMAIL_USERNAME, EMAIL_PASSWORD)  # Login to the SMTP server
-        server.send_message(msg)
-
-def create_and_send_image(user_email, job_type, job_title, job_location, job_salary):
-    # Load the base image
-    img = Image.open("input_image.png")  # Replace with your default image
-    img = img.resize((1080, 1080))  # Resize to 1080x1080px
+    # Pre-fill data if available
+    data = request.args.to_dict()
+    email_address = session['user'].get('preferred_username', '')
+    data.setdefault('email', email_address)
     
+    # Get list of templates with display names
+    templates = sorted([
+        {
+            'filename': f[:-4],
+            'display_name': f[:-4].replace("_", " ")
+        }
+        for f in os.listdir(os.path.join('static', 'BrandedAds')) if f.endswith('.jpg')
+    ], key=lambda x: x['display_name'])
+    
+    return render_template('index.html', data=data, templates=templates)
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    data = request.json
+    wants_branded_ad = data.get('wants_branded_ad', False)
+    if wants_branded_ad:
+        selected_template = data.get('template_selection')
+        if selected_template == 'New Brand':
+            # Send details to marketing team
+            send_email_to_marketing(data)
+            return 'New brand request submitted', 200
+        else:
+            # Use selected template to generate image
+            template_path = os.path.join('static', 'BrandedAds', selected_template + '.jpg')
+            image = generate_image_with_template(data, template_path)
+            send_email(data.get('email'), data.get('job_title'), image, data)
+            return 'Branded ad email sent', 200
+    else:
+        # Regular image generation
+        image = generate_image(data)
+        send_email(data.get('email'), data.get('job_title'), image, data)
+        return 'Email sent successfully', 200
+
+def generate_image(data):
+    # Create a blank image
+    img = Image.new('RGB', (1080, 1080), color='white')
     draw = ImageDraw.Draw(img)
 
-    # Load a font
-    font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"  # Path to a font file
-    font = ImageFont.truetype(font_path, 40)
+    # Load font
+    font_path = os.path.join('static', 'fonts', 'PTSans-Regular.ttf')
+    font_size = 100  # Starting font size
+    font = ImageFont.truetype(font_path, font_size)
 
-    # Text to insert
-    job_title_text = f"Job Title: {job_title}"
-    job_location_text = f"Location: {job_location}"
-    job_salary_text = f"Salary: {job_salary}"
+    # Define text and bounding box
+    text = f"{data.get('job_title', '')}\n{data.get('job_location', '')}\n{data.get('job_salary', '')}"
+    max_width = 1000
+    max_height = 1000
 
-    # Define where to place the text on the image
-    draw.text((50, 100), job_title_text, font=font, fill="black")
-    draw.text((50, 200), job_location_text, font=font, fill="black")
-    draw.text((50, 300), job_salary_text, font=font, fill="black")
+    # Adjust font size to fit within bounding box
+    while True:
+        w, h = draw.multiline_textsize(text, font=font)
+        if w <= max_width and h <= max_height:
+            break
+        font_size -= 1
+        if font_size < 10:
+            break  # Prevent font size from becoming too small
+        font = ImageFont.truetype(font_path, font_size)
 
-    # Save the image to memory
-    img_io = io.BytesIO()
-    img.save(img_io, 'JPEG', dpi=(300, 300))
-    img_io.seek(0)
+    # Calculate position
+    x = (1080 - w) / 2
+    y = (1080 - h) / 2
 
-    # Send the image to the user
-    send_email_to_user(user_email, img_io, job_title)
+    # Draw text
+    draw.multiline_text((x, y), text, fill='black', font=font, align='center')
 
-    return f'Job post image generated and sent to {user_email}.'
+    # Save image to a BytesIO object
+    img_bytes = io.BytesIO()
+    img.save(img_bytes, format='JPEG', dpi=(300, 300))
+    img_bytes.seek(0)
+    return img_bytes
 
-def send_email_to_user(to_email, image_data, job_title):
-    # Create email message
-    msg = MIMEMultipart('related')
+def generate_image_with_template(data, template_path):
+    # Open the template image
+    img = Image.open(template_path).convert('RGB')
+    draw = ImageDraw.Draw(img)
+
+    # Load font
+    font_path = os.path.join('static', 'fonts', 'PTSans-Regular.ttf')
+    font_size = 50  # Starting font size
+    font = ImageFont.truetype(font_path, font_size)
+
+    # Define text and bounding box
+    text = f"{data.get('job_title', '')}\n{data.get('job_location', '')}\n{data.get('job_salary', '')}"
+    max_width = img.width - 100
+    max_height = img.height - 100
+
+    # Adjust font size to fit within bounding box
+    while True:
+        w, h = draw.multiline_textsize(text, font=font)
+        if w <= max_width and h <= max_height:
+            break
+        font_size -= 1
+        if font_size < 10:
+            break  # Prevent font size from becoming too small
+        font = ImageFont.truetype(font_path, font_size)
+
+    # Calculate position
+    x = (img.width - w) / 2
+    y = (img.height - h) / 2
+
+    # Draw text
+    draw.multiline_text((x, y), text, fill='black', font=font, align='center')
+
+    # Save image to a BytesIO object
+    img_bytes = io.BytesIO()
+    img.save(img_bytes, format='JPEG', dpi=(300, 300))
+    img_bytes.seek(0)
+    return img_bytes
+
+def send_email(to_email, job_title, image_bytes, form_data):
+    msg = EmailMessage()
+    msg['Subject'] = f"LinkedIn Post: {job_title}"
     msg['From'] = EMAIL_USERNAME
     msg['To'] = to_email
-    msg['Subject'] = f'LinkedIn Post: {job_title}'
 
-    # Create the body with the text and an embedded image
-    body = MIMEMultipart('alternative')
-    
-    # Plain text version
-    text_part = MIMEText(f'Thank you for submitting your post for {job_title}. Your post image is attached.', 'plain')
-    
-    # HTML version
-    html_content = f"""
-    <html>
-    <body>
-        <p>Thank you for submitting your post for the job: <strong>{job_title}</strong>.</p>
-        <p>Your post image is attached.</p>
-    </body>
-    </html>
-    """
-    html_part = MIMEText(html_content, 'html')
+    # Construct the pre-filled form link with query parameters
+    link = url_for('form', _external=True, **form_data)
 
-    # Attach plain text and HTML parts to the email
-    body.attach(text_part)
-    body.attach(html_part)
-    
-    # Attach the body to the main message
-    msg.attach(body)
+    # Email content with the pre-filled form link
+    msg.set_content(f'This is an auto-generated image. If you\'d like to make any changes, please [click here]({link}).')
 
-    # Attach the image as a file
-    img_part = MIMEBase('application', 'octet-stream')
-    img_part.set_payload(image_data.read())
-    encoders.encode_base64(img_part)
-    img_part.add_header('Content-Disposition', 'attachment', filename='job_post_image.jpg')
-    msg.attach(img_part)
+    # Add the image as an attachment
+    msg.add_attachment(image_bytes.read(), maintype='image', subtype='jpeg', filename='job_post.jpeg')
 
-    # Send email via SMTP
-    with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-        server.starttls()  # Secure the connection
-        server.login(EMAIL_USERNAME, EMAIL_PASSWORD)  # Login to the SMTP server
-        server.send_message(msg)
+    # Send email using Office 365 SMTP
+    with smtplib.SMTP('smtp.office365.com', 587) as smtp:
+        smtp.starttls()
+        smtp.login(EMAIL_USERNAME, EMAIL_PASSWORD)
+        smtp.send_message(msg)
+
+def send_email_to_marketing(data):
+    msg = EmailMessage()
+    msg['Subject'] = f"New Branded Ad Request: {data.get('job_title', '')}"
+    msg['From'] = EMAIL_USERNAME
+    msg['To'] = MARKETING_EMAIL
+
+    # Email content with submission details
+    content = (
+        f"A new branded ad request has been submitted with the following details:\n\n"
+        f"Email: {data.get('email', '')}\n"
+        f"Job Type: {data.get('job_type', '')}\n"
+        f"Job Title: {data.get('job_title', '')}\n"
+        f"Job Location: {data.get('job_location', '')}\n"
+        f"Job Salary: {data.get('job_salary', '')}\n"
+        f"Published Client: {data.get('published_client', '')}\n"
+    )
+    msg.set_content(content)
+
+    # Send email using Office 365 SMTP
+    with smtplib.SMTP('smtp.office365.com', 587) as smtp:
+        smtp.starttls()
+        smtp.login(EMAIL_USERNAME, EMAIL_PASSWORD)
+        smtp.send_message(msg)
+
+def check_incoming_emails():
+    try:
+        mail = imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT)
+        mail.login(EMAIL_USERNAME, EMAIL_PASSWORD)
+        mail.select('inbox')
+
+        # Search for unseen emails from marketing team with attachments
+        status, messages = mail.search(None, f'(UNSEEN FROM "{MARKETING_EMAIL}")')
+        if status != 'OK':
+            print("No new emails found.")
+            mail.logout()
+            return
+
+        email_ids = messages[0].split()
+        for email_id in email_ids:
+            status, msg_data = mail.fetch(email_id, '(RFC822)')
+            if status != 'OK':
+                print(f"Failed to fetch email ID {email_id}")
+                continue
+
+            msg = email.message_from_bytes(msg_data[0][1])
+            subject = msg['Subject']
+            from_email = msg['From']
+
+            # Process only if it's a reply to the branded ad request
+            if "New Branded Ad Request" in subject:
+                for part in msg.walk():
+                    if part.get_content_maintype() == 'multipart':
+                        continue
+                    if part.get('Content-Disposition') is None:
+                        continue
+                    filename = part.get_filename()
+                    if filename and filename.lower().endswith(('.jpg', '.jpeg')):
+                        brand_name = os.path.splitext(filename)[0]
+                        # Replace spaces with underscores for filenames
+                        sanitized_brand_name = brand_name.replace(" ", "_")
+                        # Check if the brand already exists to prevent overwriting
+                        save_filename = f"{sanitized_brand_name}.jpg"
+                        save_path = os.path.join('static', 'BrandedAds', save_filename)
+                        if os.path.exists(save_path):
+                            print(f"Template for brand '{sanitized_brand_name}' already exists. Skipping.")
+                            continue
+                        # Save the attachment
+                        with open(save_path, 'wb') as f:
+                            f.write(part.get_payload(decode=True))
+                        print(f"Saved new branded ad template: {save_filename}")
+                # Mark email as seen
+                mail.store(email_id, '+FLAGS', '\\Seen')
+
+        mail.logout()
+    except Exception as e:
+        print(f"Error checking emails: {e}")
+
+# Schedule the email checker to run every 5 minutes
+scheduler.add_job(func=check_incoming_emails, trigger="interval", minutes=5)
 
 if __name__ == '__main__':
-    app.run(debug=True)
-
-   
+    app.run(host='0.0.0.0', port=5858)

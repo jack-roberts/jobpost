@@ -1,2 +1,7 @@
-Flask==2.0.1
-Pillow==8.3.1
+Flask>=2.3.2
+Flask-Session>=0.4.0
+python-dotenv>=1.0.0
+msal>=1.0.0
+Pillow>=9.5.0
+apscheduler>=3.9.0
+Werkzeug>=2.3.4,<3.0.0
