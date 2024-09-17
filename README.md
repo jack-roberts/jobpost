@@ -1,431 +1,676 @@
-# **Project Documentation**
+# JobPost Application Documentation
 
-## **Table of Contents**
+## Table of Contents
 
-- [Introduction](#introduction)
-- [Prerequisites](#prerequisites)
-- [Project Structure](#project-structure)
-- [Installation](#installation)
-  - [1. Clone the Repository](#1-clone-the-repository)
-  - [2. Configure Environment Variables](#2-configure-environment-variables)
-  - [3. Build and Run the Application](#3-build-and-run-the-application)
-- [Application Components](#application-components)
-  - [1. Bullhorn API Integration](#1-bullhorn-api-integration)
-  - [2. Website Form Data Import](#2-website-form-data-import)
-  - [3. Data Cross-Referencing](#3-data-cross-referencing)
-  - [4. Dashboard](#4-dashboard)
-  - [5. Reporting](#5-reporting)
-  - [6. Scheduling and Background Tasks](#6-scheduling-and-background-tasks)
-- [Database Setup](#database-setup)
-- [Email Configuration](#email-configuration)
-- [Security Considerations](#security-considerations)
-- [Troubleshooting](#troubleshooting)
-- [Additional Notes](#additional-notes)
-- [License](#license)
-
----
-
-## **Introduction**
-
-This application is a Dockerized Python application designed to integrate with the Bullhorn recruitment software API and your website's job application and contact forms. It synchronizes data between Bullhorn and a local SQL database, cross-references applicants with placements, generates reports, displays a dashboard, and sends monthly email reports.
-
-**Key Features:**
-
-- **Bullhorn API Integration:** Sync candidates, contacts, vacancies, and placements data.
-- **Website Data Import:** Import job applications and contact form submissions.
-- **Data Cross-Referencing:** Identify candidates who applied through the website and were placed.
-- **Dashboard:** Visualize data through a web interface.
-- **Reporting:** Generate and email monthly reports with financial summaries.
-- **Dockerized Deployment:** Use Docker and Docker Compose for easy setup and deployment.
-- **Scheduling:** Utilize Celery and Redis for background tasks and scheduling.
+1. [Introduction](#introduction)
+2. [Features](#features)
+3. [Prerequisites](#prerequisites)
+4. [Setup Instructions](#setup-instructions)
+    - [1. Clone the Repository](#1-clone-the-repository)
+    - [2. Install Python](#2-install-python)
+    - [3. Create and Activate a Virtual Environment](#3-create-and-activate-a-virtual-environment)
+    - [4. Install Dependencies](#4-install-dependencies)
+    - [5. Configure Environment Variables](#5-configure-environment-variables)
+5. [Azure Active Directory (Azure AD) Configuration](#azure-active-directory-azure-ad-configuration)
+    - [a. Register the Application](#a-register-the-application)
+    - [b. Configure Redirect URI](#b-configure-redirect-uri)
+    - [c. Obtain Client ID, Client Secret, and Tenant ID](#c-obtain-client-id-client-secret-and-tenant-id)
+    - [d. Set API Permissions](#d-set-api-permissions)
+6. [Running the Application](#running-the-application)
+7. [Application Structure](#application-structure)
+8. [Usage](#usage)
+    - [1. Accessing the Application](#1-accessing-the-application)
+    - [2. Authentication Flow](#2-authentication-flow)
+    - [3. Submitting a Job Post](#3-submitting-a-job-post)
+    - [4. Handling Branded Ads](#4-handling-branded-ads)
+9. [Email Processing](#email-processing)
+    - [1. Sending Emails](#1-sending-emails)
+    - [2. Receiving and Processing Emails](#2-receiving-and-processing-emails)
+10. [Troubleshooting](#troubleshooting)
+11. [Deployment](#deployment)
+    - [1. Production Server Setup](#1-production-server-setup)
+    - [2. Security Considerations](#2-security-considerations)
+12. [Contributing](#contributing)
+13. [License](#license)
+14. [Contact](#contact)
 
 ---
 
-## **Prerequisites**
+## Introduction
 
-Before setting up the application, ensure you have the following installed on your system:
-
-- **Docker** (version 19.03 or higher)
-- **Docker Compose** (version 1.25.0 or higher)
-- **Git** (optional, for cloning the repository)
+**JobPost** is a Flask-based web application designed to streamline the job posting process for Jackson Hogg Ltd. It allows authorized users to submit job listings, generate branded advertisements, and manage ad templates efficiently. The application integrates with Azure Active Directory (Azure AD) for secure authentication and utilizes email functionalities to handle communication with the marketing team for branded ad requests.
 
 ---
 
-## **Project Structure**
+## Features
 
-The application has the following directory structure:
-
-```
-your_project/
-│
-├── app/
-│   ├── __init__.py
-│   ├── main.py
-│   ├── models.py
-│   ├── routes.py
-│   ├── utils.py
-│   ├── tasks.py
-│   ├── templates/
-│   │   └── dashboard.html
-│   └── static/
-│
-├── data/          # For persistent database storage
-├── requirements.txt
-├── Dockerfile
-├── docker-compose.yml
-└── .env
-```
+- **Secure Authentication:** Utilizes Azure AD to ensure that only authorized users with `@jacksonhogg.com` email addresses can access the application.
+- **Job Submission Form:** Allows users to submit job details, including job type, title, location, salary, and optional published client information.
+- **Branded Ad Generation:** Users can opt to generate branded advertisements using existing templates or request new templates from the marketing team.
+- **Automatic Template Management:** Processes incoming emails with new ad templates, automatically adding them to the available templates for selection.
+- **Image Generation:** Uses Pillow to create customized images for job posts based on user inputs and selected templates.
+- **Email Integration:** Sends confirmation emails with generated images and handles communication with the marketing team for branded ad requests.
+- **Scheduled Tasks:** Employs APScheduler to periodically check for new incoming emails with ad templates.
 
 ---
 
-## **Installation**
+## Prerequisites
 
-### **1. Clone the Repository**
+Before setting up and running the JobPost application, ensure that your system meets the following requirements:
 
-Open your terminal and navigate to the directory where you want to set up the project. Clone the repository:
+- **Operating System:** macOS, Linux, or Windows
+- **Python:** Version 3.8 or higher
+- **Package Manager:** `pip` (Python's package installer)
+- **Azure Active Directory:** Access to Azure AD for application registration
+- **Email Account:** Office 365 email account for sending and receiving emails
+
+---
+
+## Setup Instructions
+
+Follow these steps to set up the JobPost application on your local machine.
+
+### 1. Clone the Repository
+
+First, clone the application's repository to your local machine.
 
 ```bash
-git clone https://github.com/your_username/your_project.git
-cd your_project
+git clone https://github.com/yourusername/jobpost.git
+cd jobpost
 ```
 
-> **Note:** Replace `https://github.com/your_username/your_project.git` with the actual repository URL.
+*Replace `https://github.com/yourusername/jobpost.git` with the actual repository URL.*
 
-### **2. Configure Environment Variables**
+### 2. Install Python
 
-Create a `.env` file in the root directory of your project to store environment-specific settings and sensitive information.
+Ensure that Python 3.8 or higher is installed on your system.
+
+**Check Python Installation:**
 
 ```bash
-touch .env
+python3 --version
 ```
 
-Add the following content to the `.env` file:
+**Install Python (If Not Installed):**
+
+- **macOS (Using Homebrew):**
+
+  ```bash
+  brew install python3
+  ```
+
+- **Ubuntu/Debian:**
+
+  ```bash
+  sudo apt update
+  sudo apt install python3 python3-venv python3-pip
+  ```
+
+- **Windows:**
+
+  Download and install Python from the [official website](https://www.python.org/downloads/). Ensure that you check the box to add Python to your PATH during installation.
+
+### 3. Create and Activate a Virtual Environment
+
+Creating a virtual environment ensures that your project dependencies are isolated from the system-wide Python packages.
+
+**Create Virtual Environment:**
+
+```bash
+python3 -m venv venv
+```
+
+**Activate Virtual Environment:**
+
+- **macOS/Linux:**
+
+  ```bash
+  source venv/bin/activate
+  ```
+
+- **Windows:**
+
+  ```cmd
+  venv\Scripts\activate
+  ```
+
+*After activation, your terminal prompt should be prefixed with `(venv)`.*
+
+### 4. Install Dependencies
+
+With the virtual environment activated, install the required Python packages.
+
+**Upgrade `pip`:**
+
+```bash
+pip install --upgrade pip
+```
+
+**Install Packages:**
+
+```bash
+pip install -r requirements.txt
+```
+
+*If you encounter the "externally-managed-environment" error, ensure that you are within the virtual environment and use `python -m pip` as follows:*
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+---
+
+## Azure Active Directory (Azure AD) Configuration
+
+To enable secure authentication, the application integrates with Azure AD. Follow these steps to register your application and obtain the necessary credentials.
+
+### a. Register the Application
+
+1. **Sign In to Azure Portal:**
+
+   Navigate to the [Azure Portal](https://portal.azure.com/) and sign in with your administrator credentials.
+
+2. **Navigate to Azure Active Directory:**
+
+   - In the left-hand navigation pane, select **"Azure Active Directory"**.
+
+3. **App Registrations:**
+
+   - Click on **"App registrations"** in the Azure AD menu.
+   - Click **"New registration"**.
+
+4. **Register Application:**
+
+   - **Name:** Enter a descriptive name, e.g., `JobPostApp`.
+   - **Supported Account Types:** Select **"Accounts in this organizational directory only"**.
+   - **Redirect URI:** Select **"Web"** and enter `http://localhost:5858/getAToken`.
+   - Click **"Register"**.
+
+### b. Configure Redirect URI
+
+1. **Navigate to Authentication Settings:**
+
+   - After registration, go to the **"Authentication"** section.
+
+2. **Add Redirect URI:**
+
+   - Ensure that `http://localhost:5858/getAToken` is listed under **"Redirect URIs"**.
+   - If not, add it and save the changes.
+
+### c. Obtain Client ID, Client Secret, and Tenant ID
+
+1. **Client ID:**
+
+   - In the **"Overview"** section of your registered app, copy the **"Application (client) ID"**.
+
+2. **Tenant ID:**
+
+   - Also in the **"Overview"** section, copy the **"Directory (tenant) ID"**.
+
+3. **Client Secret:**
+
+   - Navigate to the **"Certificates & secrets"** section.
+   - Under **"Client secrets"**, click **"New client secret"**.
+   - **Description:** Enter a description, e.g., `JobPostAppSecret`.
+   - **Expires:** Select an appropriate expiration period.
+   - Click **"Add"**.
+   - Copy the **"Value"** of the newly created client secret. **Note:** This value will not be shown again.
+
+### d. Set API Permissions
+
+1. **API Permissions:**
+
+   - Go to the **"API permissions"** section.
+
+2. **Add Permissions:**
+
+   - Click **"Add a permission"**.
+   - Select **"Microsoft Graph"**.
+   - Choose **"Delegated permissions"**.
+   - Search for and select **"User.Read"**.
+   - Click **"Add permissions"**.
+
+3. **Grant Admin Consent:**
+
+   - If required, click **"Grant admin consent for [Your Tenant]"** to grant the necessary permissions.
+
+---
+
+## Configure Environment Variables
+
+The application uses a `.env` file to manage sensitive configurations securely. Follow these steps to set up the environment variables.
+
+### a. Locate/Create `.env` File
+
+Ensure that a `.env` file exists in the root directory of your project. If it doesn't, create one.
+
+```bash
+cd /Users/jackroberts/Desktop/CustomApps/jobpost
+nano .env
+```
+
+### b. Populate `.env` with Required Variables
+
+Add the following variables to your `.env` file. Replace the placeholder values with your actual credentials.
 
 ```env
-# Bullhorn API credentials
-CLIENT_ID=your_client_id
-CLIENT_SECRET=your_client_secret
-USERNAME=your_bullhorn_username
-PASSWORD=your_bullhorn_password
+# Flask Configuration
+SECRET_KEY=your_generated_flask_secret_key
 
-# Database credentials
-DATABASE_URL=postgresql://your_db_user:your_db_password@db/your_db_name
+# Azure AD Configuration
+CLIENT_ID=your_application_client_id
+CLIENT_SECRET=your_application_client_secret
+TENANT_ID=your_actual_tenant_id
 
-# Email server settings
-EMAIL_HOST=smtp.example.com
-EMAIL_PORT=587
-EMAIL_USER=your_email@example.com
-EMAIL_PASS=your_email_password
-
-# Security Key
-SECRET_KEY=your_secret_key
+# Email Configuration
+EMAIL_USERNAME=your_email@jacksonhogg.com
+EMAIL_PASSWORD=your_email_password_or_app_password
+MARKETING_EMAIL=marketing@jacksonhogg.com
 ```
 
-**Replace the placeholder values with your actual credentials:**
+**Descriptions:**
 
-- **Bullhorn API Credentials:** Obtain these from your Bullhorn account.
-- **Database Credentials:** Ensure they match the settings in `docker-compose.yml`.
-- **Email Server Settings:** Use your email provider's SMTP settings.
-- **Secret Key:** Generate a random secret key for Flask sessions.
+- **SECRET_KEY:**  
+  A strong, random string used by Flask to secure sessions and cookies. You can generate one using Python:
 
-> **Important:** The `.env` file contains sensitive information. Do not commit this file to version control.
+  ```python
+  import secrets
+  secrets.token_urlsafe(32)
+  ```
 
-### **3. Build and Run the Application**
+- **CLIENT_ID:**  
+  The **Application (client) ID** obtained from Azure AD.
 
-Use Docker Compose to build and start the application:
+- **CLIENT_SECRET:**  
+  The **Client Secret** generated in Azure AD.
+
+- **TENANT_ID:**  
+  The **Directory (tenant) ID** from Azure AD.
+
+- **EMAIL_USERNAME:**  
+  The email address used to send emails (e.g., `your_email@jacksonhogg.com`).
+
+- **EMAIL_PASSWORD:**  
+  The password or app-specific password for the email account.
+
+- **MARKETING_EMAIL:**  
+  The email address of the marketing team to receive ad requests (e.g., `marketing@jacksonhogg.com`).
+
+### c. Save and Exit
+
+If using `nano`, press `CTRL + O` to save and `CTRL + X` to exit.
+
+### d. Secure the `.env` File
+
+Ensure that the `.env` file is **excluded from version control** to protect sensitive information.
+
+**Add to `.gitignore`:**
+
+```gitignore
+.env
+venv/
+__pycache__/
+*.pyc
+```
+
+---
+
+## Running the Application
+
+With the virtual environment activated and dependencies installed, you can now run the Flask application.
+
+### a. Activate the Virtual Environment (If Not Already Active)
 
 ```bash
-docker-compose up --build
+source venv/bin/activate
 ```
 
-This command performs the following:
+*Your terminal prompt should display `(venv)`.*
 
-- Builds the Docker images defined in `docker-compose.yml`.
-- Starts the services:
-  - **web:** The Flask application.
-  - **db:** PostgreSQL database.
-  - **redis:** Redis server for Celery.
-  - **celery_worker:** Celery worker for background tasks.
-  - **celery_beat:** Celery Beat for scheduling tasks.
+### b. Start the Flask Application
 
----
+```bash
+python app.py
+```
 
-## **Application Components**
+**Expected Output:**
 
-### **1. Bullhorn API Integration**
+```
+ * Serving Flask app 'app'
+ * Debug mode: off
+WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5858
+ * Running on http://192.168.5.4:5858
+Press CTRL+C to quit
+```
 
-The application connects to the Bullhorn API to retrieve data on candidates, contacts, vacancies, and placements.
+### c. Access the Application
 
-- **Authentication:** Uses OAuth 2.0 to authenticate with Bullhorn.
-- **Data Retrieval:** Fetches data and stores it in the local PostgreSQL database.
-- **Periodic Updates:** Schedules regular updates to keep data in sync.
+Open your web browser and navigate to:
 
-### **2. Website Form Data Import**
+```
+http://localhost:5858/
+```
 
-Imports job application and contact form submissions from your website:
+or
 
-- **Job Applications:** Stored as applicants in the database.
-- **Contact Forms:** Stored and cross-referenced with vacancies.
-
-**Data Sources:**
-
-- **API Endpoint:** If your website provides an API.
-- **Database Connection:** Directly connect to your website's database.
-- **CSV/JSON Files:** Import data from exported files.
-
-### **3. Data Cross-Referencing**
-
-Cross-references imported applicants and contacts with Bullhorn data:
-
-- **Applicants and Placements:**
-  - Flags candidates who applied through your website and were placed.
-  - Ensures the application was made no more than 9 months before the placement.
-- **Contacts and Vacancies:**
-  - Identifies clients who found you through the website.
-  - Matches the company field in contact forms with vacancies.
-
-### **4. Dashboard**
-
-Provides a web-based dashboard to visualize data:
-
-- **URL:** Access the dashboard at `http://localhost:5000`.
-- **Features:**
-  - List of applicants who were placed.
-  - Individual placement values.
-  - Total placement value per month.
-  - Clients who contacted via the website leading to vacancies.
-- **Templates:** Uses Flask templates in the `app/templates` directory.
-
-### **5. Reporting**
-
-Generates and sends monthly reports via email:
-
-- **Content:**
-  - Summary of placements and financials for the past month.
-  - Detailed information on applicants and placements.
-- **Scheduling:**
-  - Automated to run on the 1st of every month.
-  - Utilizes Celery Beat for scheduling.
-
-### **6. Scheduling and Background Tasks**
-
-Uses Celery and Redis for asynchronous tasks and scheduling:
-
-- **Celery Worker:** Handles background tasks like data updates and email sending.
-- **Celery Beat:** Schedules periodic tasks.
-- **Tasks Defined In:** `app/tasks.py`.
-
-**Scheduled Tasks:**
-
-- **Data Updates:** Every hour.
-- **Monthly Reports:** On the 1st of every month.
+```
+http://127.0.0.1:5858/
+```
 
 ---
 
-## **Database Setup**
+## Application Structure
 
-The application uses PostgreSQL as the database:
+Here's an overview of the application's directory structure:
 
-- **Service Name:** `db` (as defined in `docker-compose.yml`).
-- **Credentials:** Defined in both `.env` and `docker-compose.yml`.
+```
+jobpost/
+├── app.py
+├── requirements.txt
+├── .env
+├── templates/
+│   └── index.html
+├── static/
+│   ├── fonts/
+│   │   └── PTSans-Regular.ttf
+│   └── BrandedAds/
+│       ├── Existing_Template1.jpg
+│       ├── Existing_Template2.jpg
+│       └── ... (other templates)
+└── venv/ (virtual environment directory, excluded from version control)
+```
 
-**Database Initialization:**
+**Descriptions:**
 
-Before running the application, ensure the database tables are created:
+- **app.py:**  
+  The main Flask application file containing all route definitions and business logic.
 
-1. **Run Database Migrations:**
+- **requirements.txt:**  
+  Lists all Python dependencies required by the application.
 
-   - Install Flask-Migrate (already included in `requirements.txt`):
+- **.env:**  
+  Stores environment variables securely (excluded from version control).
 
-     ```bash
-     docker-compose exec web flask db init
-     docker-compose exec web flask db migrate
-     docker-compose exec web flask db upgrade
-     ```
+- **templates/index.html:**  
+  The HTML template for the job submission form.
 
-2. **Alternative Method:**
+- **static/fonts/PTSans-Regular.ttf:**  
+  The TrueType font used for image generation.
 
-   - Modify `app/__init__.py` to create tables on startup (not recommended for production):
+- **static/BrandedAds/:**  
+  Directory containing existing branded ad templates in `.jpg` format.
 
-     ```python
-     with app.app_context():
-         db.create_all()
-     ```
-
----
-
-## **Email Configuration**
-
-The application sends emails using SMTP:
-
-- **SMTP Settings:** Configured in the `.env` file.
-- **Email Functionality:**
-  - Sends monthly reports.
-  - Can be extended to send alerts or notifications.
-
-**Supported Email Providers:**
-
-- **Gmail:** Requires app passwords and enabling less secure apps.
-- **SendGrid, Mailgun, etc.:** Recommended for reliability and scalability.
-
-**Email Sending Implementation:**
-
-- **Uses:** `smtplib` or a third-party library.
-- **Defined In:** `app/utils.py` or `app/tasks.py`.
+- **venv/:**  
+  The virtual environment directory containing isolated Python packages (excluded from version control).
 
 ---
 
-## **Security Considerations**
+## Usage
 
-- **Environment Variables:**
-  - Store sensitive information in the `.env` file.
-  - Do not commit the `.env` file to version control.
-- **Database Security:**
-  - Use strong passwords for database access.
-  - Ensure the database is not exposed outside the Docker network.
-- **API Credentials:**
-  - Protect Bullhorn API credentials.
-  - Rotate credentials periodically.
-- **Email Credentials:**
-  - Secure email account credentials.
-  - Consider using an email API with tokens instead of raw passwords.
-- **Secret Key:**
-  - Set `SECRET_KEY` in the `.env` file for Flask sessions.
-  - Use a secure, randomly generated string.
+### 1. Accessing the Application
 
----
+Navigate to `http://localhost:5858/` in your web browser. If you're accessing it from another device on the same network, use `http://<your-ip-address>:5858/`.
 
-## **Troubleshooting**
+### 2. Authentication Flow
 
-### **Common Issues and Solutions**
+1. **Login:**
 
-1. **Docker Container Fails to Start:**
+   - Upon accessing the application, you'll be redirected to the Azure AD login page.
+   - Log in using an `@jacksonhogg.com` email account.
 
-   - **Check Logs:**
+2. **Authorization:**
 
-     ```bash
-     docker-compose logs web
-     ```
+   - After successful authentication, Azure AD redirects you back to the application.
 
-   - **Possible Causes:**
-     - Missing environment variables.
-     - Port conflicts.
-     - Dependency services not running.
+3. **Access Form:**
 
-2. **Database Connection Errors:**
+   - Authenticated users are directed to the job submission form at `/form`.
 
-   - **Solution:**
-     - Verify database credentials in `.env` and `docker-compose.yml`.
-     - Ensure the `db` service is running.
+### 3. Submitting a Job Post
 
-3. **Bullhorn API Authentication Fails:**
+1. **Fill Out the Form:**
 
-   - **Solution:**
-     - Check Bullhorn API credentials.
-     - Ensure network connectivity.
-     - Handle token expiration and refresh logic.
+   - **Your Email:** Automatically pre-filled with your authenticated email address.
+   - **Job Type:** Select either "Permanent" or "Temporary".
+   - **Job Title:** Enter the title of the job.
+   - **Job Location:** Specify the location of the job.
+   - **Job Salary:** Provide the salary details.
+   - **Published Client (Optional):** If applicable, enter the client name.
 
-4. **Emails Not Sending:**
+2. **Branded Ad Option:**
 
-   - **Solution:**
-     - Verify SMTP settings.
-     - Check email server logs.
-     - Ensure less secure app access is enabled if using Gmail.
+   - **Do you want a branded ad?**  
+     Choose "Yes" or "No".
+     
+   - **If "Yes":**
+     - **Select a Branded Ad Template:**  
+       Choose from existing templates or select "New Brand" to request a new template.
 
-5. **Scheduled Tasks Not Running:**
+3. **Submit:**
 
-   - **Solution:**
-     - Ensure `celery_worker` and `celery_beat` services are running.
-     - Check Celery logs:
+   - Click the **"Submit"** button to process the form.
 
-       ```bash
-       docker-compose logs celery_worker
-       docker-compose logs celery_beat
-       ```
+### 4. Handling Branded Ads
 
-6. **Data Not Updating:**
+- **Using Existing Templates:**
 
-   - **Solution:**
-     - Verify that the data update task is scheduled and running.
-     - Manually trigger the task for testing.
+  - If you select an existing template, the application generates an image based on your job details and the chosen template.
+  - An email with the generated image is sent to the specified email address.
 
-     ```bash
-     docker-compose exec web flask shell
-     >>> from app.tasks import update_data_task
-     >>> update_data_task.delay()
-     ```
+- **Requesting a New Template:**
 
-7. **Web Application Unresponsive:**
-
-   - **Solution:**
-     - Check the `web` service logs.
-     - Ensure all migrations are applied.
-     - Verify that the Flask app is running without errors.
+  - Selecting "New Brand" sends an email to the marketing team with your job details.
+  - The marketing team designs a new branded ad template and sends it as an attachment.
+  - The application periodically checks for incoming emails from the marketing team and adds new templates automatically.
 
 ---
 
-## **Additional Notes**
+## Email Processing
 
-### **Extending the Application**
+The application handles sending and receiving emails to manage job postings and branded ad templates.
 
-- **Additional Features:**
-  - Implement user authentication for the dashboard.
-  - Add more detailed analytics and visualizations.
-  - Integrate with other third-party services.
+### 1. Sending Emails
 
-- **Scaling:**
-  - Use orchestration tools like Kubernetes for large deployments.
-  - Consider cloud-based solutions for hosting.
+- **Job Post Confirmation:**
 
-### **Development Tips**
+  - After submitting a job post, the application sends an email to the specified address with the generated image attached.
+  - If a branded ad is requested, the email includes a link to pre-fill the form for any necessary edits.
 
-- **Use a Virtual Environment:**
-  - While Docker handles dependencies, you can set up a virtual environment for local development.
+- **Branded Ad Requests:**
 
-    ```bash
-    python3 -m venv venv
-    source venv/bin/activate
-    pip install -r requirements.txt
-    ```
+  - Selecting "New Brand" sends an email to the marketing team with the job details.
+  - The marketing team is expected to reply with the new ad template attached.
 
-- **Testing:**
-  - Write unit tests for critical functions.
-  - Use testing frameworks like `pytest`.
+### 2. Receiving and Processing Emails
 
-- **Code Formatting:**
-  - Follow PEP 8 style guidelines.
-  - Use linters like `flake8`.
+- **Automatic Email Checking:**
 
-### **Logging and Monitoring**
+  - The application uses **APScheduler** to schedule a task that runs every 5 minutes.
+  - This task checks the inbox for new, unseen emails from the marketing team containing `.jpg` attachments.
 
-- **Logging:**
-  - Implement logging within the application using Python's `logging` module.
-  - Configure log levels and handlers as needed.
+- **Processing New Templates:**
 
-- **Monitoring:**
-  - Set up monitoring tools to track application performance.
-  - Use services like Prometheus and Grafana for metrics.
-
-### **Updating Dependencies**
-
-- **Regularly Update Packages:**
-  - Keep dependencies up to date to receive security patches.
-  - Update `requirements.txt` as needed.
+  - When a new ad template is received, the application saves it in the `static/BrandedAds/` directory.
+  - Filenames use underscores instead of spaces for consistency (e.g., `Brand_Name.jpg`).
+  - The new template becomes available in the job submission form's dropdown menu with spaces in the display name (e.g., `Brand Name`).
 
 ---
 
-## **License**
+## Troubleshooting
 
-This project is licensed under the **MIT License**. You are free to use, modify, and distribute this software as per the license terms.
+### Common Issues and Solutions
+
+#### 1. **Port 5000 is Already in Use**
+
+- **Issue:**  
+  Flask defaults to running on port 5000, which may be in use by another application.
+
+- **Solution:**  
+  Change the port number in `app.py` to an available port (e.g., 5858).
+
+  ```python
+  if __name__ == '__main__':
+      app.run(host='0.0.0.0', port=5858)
+  ```
+
+#### 2. **Invalid Azure AD Tenant ID**
+
+- **Issue:**  
+  Authentication fails with an error indicating an invalid Tenant ID.
+
+- **Solution:**  
+  - Ensure that the `TENANT_ID` in your `.env` file is correct.
+  - Verify the Tenant ID via the Azure Portal.
+  - Confirm that the app registration has the correct permissions and credentials.
+
+#### 3. **"externally-managed-environment" Error**
+
+- **Issue:**  
+  Encountered when attempting to install packages, indicating conflicts with system-managed Python environments.
+
+- **Solution:**  
+  - **Use a Virtual Environment:** Ensure you're working within a virtual environment.
+  - **Recreate the Virtual Environment:** If the virtual environment is broken, delete and recreate it.
+  - **Use `python -m pip`:** Install packages using `python -m pip` instead of `pip` directly.
+
+#### 4. **Cannot Import `url_quote` from `werkzeug.urls`**
+
+- **Issue:**  
+  Compatibility issues between Flask and Werkzeug versions.
+
+- **Solution:**  
+  - **Upgrade Flask:** Ensure Flask is updated to the latest version compatible with your Werkzeug version.
+  - **Pin Werkzeug Version:** Set Werkzeug to a version below 3.0.0 in `requirements.txt`.
+
+#### 5. **Application Crashes on `/login` Route**
+
+- **Issue:**  
+  Errors occur when accessing the login route due to misconfigurations.
+
+- **Solution:**  
+  - **Verify `.env` Variables:** Ensure all necessary environment variables are correctly set.
+  - **Check Azure AD Configuration:** Confirm that the app registration is correctly configured in Azure AD.
 
 ---
 
-## **Conclusion**
+## Deployment
 
-This documentation provides a comprehensive guide to setting up and running the application. By following the steps outlined, you should be able to integrate with Bullhorn, import and process data, and visualize results through the dashboard and reports.
+For production deployment, consider using a production-grade WSGI server and ensuring the application is secured properly.
 
-If you encounter any issues or have suggestions for improvements, feel free to reach out or contribute to the project.
+### 1. Production Server Setup
+
+- **Use a WSGI Server:**  
+  Deploy the Flask application using a WSGI server like **Gunicorn** or **uWSGI**.
+
+  **Example with Gunicorn:**
+
+  ```bash
+  pip install gunicorn
+  gunicorn -w 4 -b 0.0.0.0:5858 app:app
+  ```
+
+  - **`-w 4`:** Number of worker processes.
+  - **`-b 0.0.0.0:5858`:** Bind to all interfaces on port 5858.
+
+- **Reverse Proxy:**  
+  Set up a reverse proxy using **Nginx** or **Apache** to handle incoming requests, SSL termination, and load balancing.
+
+### 2. Security Considerations
+
+- **Enable HTTPS:**  
+  Ensure that all communications are encrypted using SSL/TLS.
+
+- **Secure Environment Variables:**  
+  Use secure methods to manage environment variables in production, such as secret managers or environment variables set on the server.
+
+- **Regular Updates:**  
+  Keep all dependencies updated to the latest secure versions.
+
+- **Firewall Configuration:**  
+  Restrict access to necessary ports and services only.
 
 ---
 
-**Thank you for using this application!**
+## Contributing
+
+Contributions are welcome! Follow these steps to contribute to the JobPost application.
+
+### 1. Fork the Repository
+
+- Click the **"Fork"** button on the repository's GitHub page to create your own copy.
+
+### 2. Clone Your Fork
+
+```bash
+git clone https://github.com/yourusername/jobpost.git
+cd jobpost
+```
+
+### 3. Create a New Branch
+
+```bash
+git checkout -b feature/your-feature-name
+```
+
+### 4. Make Changes and Commit
+
+```bash
+# Make your changes in the codebase
+
+git add .
+git commit -m "Add your descriptive commit message"
+```
+
+### 5. Push to Your Fork
+
+```bash
+git push origin feature/your-feature-name
+```
+
+### 6. Create a Pull Request
+
+- Navigate to your forked repository on GitHub.
+- Click **"Compare & pull request"**.
+- Provide a descriptive title and detailed description of your changes.
+- Submit the pull request.
+
+### 7. Address Feedback
+
+- Collaborate with the maintainers to refine your contributions based on feedback.
+
+---
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
+
+
+---
+
+## Appendix
+
+### Additional Resources
+
+- **Flask Documentation:**  
+  [https://flask.palletsprojects.com/](https://flask.palletsprojects.com/)
+
+- **MSAL for Python Documentation:**  
+  [https://github.com/AzureAD/microsoft-authentication-library-for-python](https://github.com/AzureAD/microsoft-authentication-library-for-python)
+
+- **Pillow Documentation:**  
+  [https://pillow.readthedocs.io/](https://pillow.readthedocs.io/)
+
+- **APScheduler Documentation:**  
+  [https://apscheduler.readthedocs.io/](https://apscheduler.readthedocs.io/)
+
+- **Python-dotenv Documentation:**  
+  [https://saurabh-kumar.com/python-dotenv/](https://saurabh-kumar.com/python-dotenv/)
+
+- **GitHub Guides:**  
+  [https://guides.github.com/](https://guides.github.com/)
+
+---
+
+*This documentation provides a comprehensive guide to setting up, configuring, running, and maintaining the JobPost Flask application. Ensure that all sensitive information, such as client secrets and email passwords, are kept secure and not exposed in version control systems.*
